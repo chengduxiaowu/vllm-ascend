@@ -341,12 +341,16 @@ class NPUPlatform(Platform):
                 assert cache_config.mamba_block_size % cache_config.block_size == 0, (
                     f"mamba_block_size must be a multiple of block_size: {cache_config.block_size}"
                 )
-    
+
     @classmethod
     def _validate_draft_decode_context_parallel_config(
         cls,
         vllm_config: VllmConfig,
     ) -> None:
+        speculative_config = vllm_config.speculative_config
+        if speculative_config is None:
+            return
+
         parallel_config = vllm_config.parallel_config
         decode_context_parallel_size = parallel_config.decode_context_parallel_size
         if decode_context_parallel_size <= 1:
