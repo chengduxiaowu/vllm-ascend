@@ -302,7 +302,11 @@ class DCPManager:
             positions_gpu = num_computed_tokens[req_indices_gpu].to(torch.int64) + position_offsets
             positions[:total_num_scheduled_tokens].copy_(positions_gpu)
 
-            extra_tokens = self.decode_threshold - 2
+            # Dynamic SD: use the per-step K (``num_spec_tokens``) instead of
+            # the configured maximum so the rebuilt MTP slot layout matches the
+            # stride the proposer indexes with. When K <= 1, ``extra_tokens``
+            # is <= 0 and this branch is skipped.
+            extra_tokens = num_spec_tokens - 1
             if extra_tokens > 0 and not with_prefill:
                 query_start_loc = self.query_start_loc_full.gpu[: num_reqs + 1]
                 query_lens = (query_start_loc[1:] - query_start_loc[:-1]).to(torch.int64)
@@ -406,7 +410,6 @@ class DCPManager:
             arange_np,
             draft_token_ids,
             scheduler_output,
-            num_spec_tokens,
             precomputed_positions_np,
             prev_positions,
         )
@@ -430,9 +433,18 @@ class DCPManager:
             self.async_rebuild_cu_num_tokens = cu_num_tokens.copy()
             self.async_rebuild_num_tokens = int(cumulative[-1])
 
-        if self.decode_threshold <= 2:
+        # Dynamic SD: the per-step K (``num_spec_tokens``) can vary by batch
+        # size and may even be 0/1. When K <= 1 there are no extra MTP draft
+        # slots to map, so skip the slot-mapping computation entirely -- this
+        # avoids over-allocating slots and the extra work on every step.
+        if num_spec_tokens is None or num_spec_tokens <= 1:
             return
-        extra_tokens = self.decode_threshold - 2
+        # ``extra_tokens`` is the number of MTP draft slots appended per
+        # request. It MUST equal ``num_speculative_tokens - 1`` used as the
+        # per-request stride in ``_get_spec_decode_mtp_slot_inputs``; under DSD
+        # that stride is the per-step K, so the build stride must follow it
+        # instead of the configured maximum (``decode_threshold``).
+        extra_tokens = num_spec_tokens - 1
         req_indices_split = np.array_split(req_indices, cu_num_tokens)[: self.num_reqs]
         positions_split = np.array_split(positions_np, cu_num_tokens)[: self.num_reqs]
         for req_idx in range(self.num_reqs):

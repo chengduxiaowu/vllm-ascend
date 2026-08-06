@@ -1219,14 +1219,10 @@ def _validate_draft_decode_context_parallel_config(vllm_config: VllmConfig) -> N
     if decode_context_parallel_size <= 1:
         return
 
-    if speculative_config and speculative_config.num_speculative_tokens_per_batch_size:
-        raise ValueError(
-            "Dynamic speculative decoding and decode context "
-            "parallelism is not supported by vLLM Ascend. Please set "
-            "--decode-context-parallel-size to 1 or remove "
-            "num_speculative_tokens_per_batch_size from "
-            "--speculative-config."
-        )
+    # Dynamic speculative decoding (num_speculative_tokens_per_batch_size) is
+    # now supported together with DCP: the per-step K is threaded from the
+    # scheduler (num_spec_tokens_to_schedule) through DCPManager's MTP slot
+    # mapping / mask builders instead of relying on the configured maximum.
 
     draft_model_config = speculative_config.draft_model_config
     if draft_model_config is None:
